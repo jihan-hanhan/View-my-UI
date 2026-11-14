@@ -1,0 +1,22 @@
+pluginManagement {
+    repositories {
+        // ForgeGradle 插件仓库
+        maven {
+            name = 'MinecraftForge'
+            url = 'https://maven.minecraftforge.net/'
+        }
+        // 国内可用镜像，优先于官方源，避免 Plugin Portal 访问不畅
+        maven {
+            name = 'TencentMirror'
+            url = 'https://mirrors.cloud.tencent.com/nexus/repository/maven-public/'
+        }
+        gradlePluginPortal()
+        mavenCentral()
+    }
+}
+
+rootProject.name = 'viewmyui'
+
+include 'core'
+include 'forge'
+include 'editor'

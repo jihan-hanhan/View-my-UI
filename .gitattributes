@@ -1,0 +1,12 @@
+# 统一用 LF，避免 Windows / CI 之间出现整文件改动
+* text=auto eol=lf
+
+# Windows 脚本保持 CRLF
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# 二进制
+*.jar binary
+*.zip binary
+*.png binary
+*.ogg binary

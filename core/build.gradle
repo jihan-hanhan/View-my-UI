@@ -1,0 +1,20 @@
+plugins {
+    id 'java-library'
+}
+
+// core 是纯 Java 库：禁止依赖任何 Minecraft / Forge 类型。
+// 这是"换 MC 版本时编辑器与合成逻辑一行不用动"的唯一保障。
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(17)
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+}
+
+dependencies {
+    // 只用来读 manifest.json。gson 是纯 Java 库，不违反"零 Minecraft 依赖"。
+    api 'com.google.code.gson:gson:2.10.1'
+}

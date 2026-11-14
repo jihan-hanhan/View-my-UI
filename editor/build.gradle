@@ -1,0 +1,111 @@
+plugins {
+    id 'application'
+}
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(17)
+    }
+}
+
+// JavaFX 不在 JDK 里，只能从 Maven 拉；国内走腾讯镜像，一般能把 10MB 左右下完。
+def javafxVersion = '17.0.13'
+def javafxModules = ['base', 'graphics', 'controls']
+// 内嵌进模组 jar 时一次带齐所有平台的 native。
+// 注意：JavaFX 17/21 在 Maven Central 上只有 win / linux / mac / mac-aarch64 四种，
+// 没有 linux-aarch64、也没有 win-aarch64——这两类机器需要自行换 JavaFX 才能跑编辑器。
+def javafxPlatforms = ['win', 'linux', 'mac', 'mac-aarch64']
+
+// 本机平台：让 installDist 打出来的编辑器开箱即用；可用 -PjavafxPlatform=... 覆盖
+def hostPlatform = {
+    String os = System.getProperty('os.name', '').toLowerCase(Locale.ROOT)
+    String arch = System.getProperty('os.arch', '').toLowerCase(Locale.ROOT)
+    boolean arm = arch.contains('aarch64') || arch.contains('arm64')
+    if (os.contains('win')) {
+        return 'win'
+    }
+    if (os.contains('mac') || os.contains('darwin')) {
+        return arm ? 'mac-aarch64' : 'mac'
+    }
+    // Maven 上没有 linux-aarch64 的 JavaFX，只能按 x64 构建（运行时会因缺 native 失败）
+    return 'linux'
+}()
+def javafxPlatform = (project.findProperty('javafxPlatform') ?: hostPlatform).toString()
+
+configurations {
+    // 只用于内嵌：所有平台的 JavaFX 运行库，不参与普通编译
+    javafxAll {
+        canBeConsumed = false
+        canBeResolved = true
+    }
+}
+
+dependencies {
+    implementation project(':core')
+    javafxModules.each { module ->
+        implementation "org.openjfx:javafx-${module}:${javafxVersion}:${javafxPlatform}"
+        javafxPlatforms.each { platform ->
+            javafxAll "org.openjfx:javafx-${module}:${javafxVersion}:${platform}"
+        }
+    }
+}
+
+application {
+    // 入口刻意不用 Application 子类，否则在 classpath 模式下会报
+    // "JavaFX runtime components are missing"。
+    mainClass = 'com.viewmyui.editor.EditorLauncher'
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+}
+
+/**
+ * 把编辑器运行期依赖整理到 {@code editor/build/editor-bundle/}：
+ * {@code lib/*.jar}（core + editor + gson + 全平台 JavaFX）与 {@code version.txt}。
+ * 模组 jar 会把这个目录原样塞进 {@code META-INF/viewmyui/editor/}，首次 F10 时解压运行。
+ */
+tasks.register('editorBundle', Sync) {
+    description = '整理可内嵌进模组 jar 的编辑器运行库（含全平台 JavaFX）'
+    group = 'distribution'
+    dependsOn tasks.named('installDist')
+
+    from(layout.buildDirectory.dir('install/editor/lib')) {
+        // installDist 只带本平台 JavaFX，且含 0 字节的占位 jar；统一换成 javafxAll
+        exclude 'javafx-*.jar'
+    }
+    from(configurations.javafxAll) {
+        // 每个 JavaFX 模块的"无 classifier"jar 只有几百字节（空 jar），别带进去
+        exclude { details -> details.file.length() < 1024 }
+    }
+    into layout.buildDirectory.dir('editor-bundle/lib')
+
+    def versionFile = layout.buildDirectory.file('editor-bundle/version.txt')
+    def indexFile = layout.buildDirectory.file('editor-bundle/index.txt')
+    outputs.file(versionFile)
+    outputs.file(indexFile)
+
+    doLast {
+        // 版本戳带内容哈希：编辑器代码或依赖一变，解压目录就换一个，避免用到旧的 jar
+        def libDir = layout.buildDirectory.dir('editor-bundle/lib').get().asFile
+        libDir.listFiles()?.findAll { it.length() == 0 }?.each { it.delete() }
+        def digest = java.security.MessageDigest.getInstance('SHA-256')
+        libDir.listFiles()?.sort { it.name }?.each { file ->
+            digest.update(file.name.getBytes('UTF-8'))
+            file.withInputStream { input ->
+                byte[] buffer = new byte[64 * 1024]
+                int read
+                while ((read = input.read(buffer)) > 0) {
+                    digest.update(buffer, 0, read)
+                }
+            }
+        }
+        String hash = digest.digest().encodeHex().toString().substring(0, 12)
+        versionFile.get().asFile.text = "${project.version}-${hash}\n"
+        // 运行时只能按 classpath 资源逐个读，先给它一份清单，省得去猜模组 jar 的磁盘路径
+        indexFile.get().asFile.text = libDir.listFiles()
+                .collect { 'lib/' + it.name }
+                .sort()
+                .join('\n') + '\n'
+    }
+}

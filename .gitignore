@@ -1,0 +1,39 @@
+# Gradle
+.gradle/
+build/
+
+# Java
+*.class
+*.log
+hs_err_pid*
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.settings/
+.classpath
+.project
+*.launch
+
+# Forge 开发环境运行目录（含游戏资源与日志，体积很大）
+/forge/run/
+/run/
+/runs/
+
+# 构建/发布产物
+dist/*
+
+# 编辑器运行期配置（只忽略仓库根目录的同名目录，别误伤 com/viewmyui 包）
+editor-config.json
+/viewmyui/
+
+# 临时文件
+.screenshots/
+*.tmp
+
+# OS
+Thumbs.db
+.DS_Store
