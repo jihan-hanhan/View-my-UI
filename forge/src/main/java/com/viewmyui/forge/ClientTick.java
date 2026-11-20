@@ -3,23 +3,24 @@ package com.viewmyui.forge;
 import com.mojang.blaze3d.platform.InputConstants;
 import com.viewmyui.forge.capture.BlitRecorder;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.screens.controls.KeyBindsScreen;
+import net.minecraft.client.gui.screens.options.controls.KeyBindsScreen;
 import net.minecraft.network.chat.Component;
-import net.minecraftforge.api.distmarker.Dist;
-import net.minecraftforge.client.event.InputEvent;
-import net.minecraftforge.event.TickEvent;
-import net.minecraftforge.eventbus.api.SubscribeEvent;
-import net.minecraftforge.fml.common.Mod;
+import net.neoforged.api.distmarker.Dist;
+import net.neoforged.bus.api.SubscribeEvent;
+import net.neoforged.fml.common.EventBusSubscriber;
+import net.neoforged.neoforge.client.event.ClientTickEvent;
+import net.neoforged.neoforge.client.event.InputEvent;
+import net.neoforged.neoforge.client.event.RenderFrameEvent;
 
 /**
  * 只在客户端跑。F9 把当前这一帧写成 manifest，F10 拉起独立编辑器进程。
  *
  * <p>热键不能靠 {@link net.minecraft.client.KeyMapping#consumeClick()}：只要屏幕上开着 GUI，
  * 按键会被 {@code Screen} 吃掉，KeyMapping 的状态根本不会更新——而我们要抓的恰恰是 GUI。
- * 所以额外监听 Forge 的原始按键事件（对所有按键都会触发，与界面无关）。
+ * 所以额外监听原始按键事件（对所有按键都会触发，与界面无关）。
  * 键位仍来自 KeyMapping，玩家在「选项 → 控制」里改绑即可生效。
  */
-@Mod.EventBusSubscriber(modid = ViewMyUI.MOD_ID, bus = Mod.EventBusSubscriber.Bus.FORGE, value = Dist.CLIENT)
+@EventBusSubscriber(modid = ViewMyUI.MOD_ID, bus = EventBusSubscriber.Bus.GAME, value = Dist.CLIENT)
 public final class ClientTick {
 
     /** GLFW_PRESS：忽略按住重复与抬起 */
@@ -37,10 +38,8 @@ public final class ClientTick {
      * 某些模组会在渲染中途再 new 一个 GuiGraphics，用构造器当帧信号会把之前画的全清掉。
      */
     @SubscribeEvent
-    public static void onRenderTick(TickEvent.RenderTickEvent event) {
-        if (event.phase == TickEvent.Phase.START) {
-            BlitRecorder.INSTANCE.frameStart();
-        }
+    public static void onRenderFrame(RenderFrameEvent.Pre event) {
+        BlitRecorder.INSTANCE.frameStart();
     }
 
     /**
@@ -68,10 +67,7 @@ public final class ClientTick {
     }
 
     @SubscribeEvent
-    public static void onClientTick(TickEvent.ClientTickEvent event) {
-        if (event.phase != TickEvent.Phase.END) {
-            return;
-        }
+    public static void onClientTick(ClientTickEvent.Post event) {
         Minecraft minecraft = Minecraft.getInstance();
 
         // 开发期自动采集：进入任意界面后录 2 秒再落盘，用于验证整条链路

@@ -1,9 +1,9 @@
 pluginManagement {
     repositories {
-        // ForgeGradle 插件仓库
+        // NeoGradle 7 插件仓库（1.21.1 起改用 NeoForge 官方 Maven）
         maven {
-            name = 'MinecraftForge'
-            url = 'https://maven.minecraftforge.net/'
+            name = 'NeoForged'
+            url = 'https://maven.neoforged.net/releases'
         }
         // 国内可用镜像，优先于官方源，避免 Plugin Portal 访问不畅
         maven {

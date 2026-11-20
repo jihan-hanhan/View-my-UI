@@ -2,16 +2,16 @@ package com.viewmyui.forge;
 
 import com.mojang.blaze3d.platform.InputConstants;
 import net.minecraft.client.KeyMapping;
-import net.minecraftforge.api.distmarker.Dist;
-import net.minecraftforge.client.event.RegisterKeyMappingsEvent;
-import net.minecraftforge.eventbus.api.SubscribeEvent;
-import net.minecraftforge.fml.common.Mod;
+import net.neoforged.api.distmarker.Dist;
+import net.neoforged.bus.api.SubscribeEvent;
+import net.neoforged.fml.common.EventBusSubscriber;
+import net.neoforged.neoforge.client.event.RegisterKeyMappingsEvent;
 
 /**
  * 客户端专用初始化。用 {@code value = Dist.CLIENT} 保证该类不会在专用服务端被加载
  * （否则会触发客户端专属类的 NoClassDefFoundError）。
  */
-@Mod.EventBusSubscriber(modid = ViewMyUI.MOD_ID, bus = Mod.EventBusSubscriber.Bus.MOD, value = Dist.CLIENT)
+@EventBusSubscriber(modid = ViewMyUI.MOD_ID, bus = EventBusSubscriber.Bus.MOD, value = Dist.CLIENT)
 public final class ClientSetup {
 
     public static final String CATEGORY = "key.categories.viewmyui";

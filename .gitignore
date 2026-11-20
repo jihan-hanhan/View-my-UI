@@ -1,11 +1,13 @@
 # Gradle
 .gradle/
 build/
+.nb-gradle/
 
 # Java
 *.class
 *.log
 hs_err_pid*
+*.hprof
 
 # IDE
 .idea/
@@ -17,6 +19,13 @@ hs_err_pid*
 .classpath
 .project
 *.launch
+out/
+bin/
+.vs/
+
+# 工具临时目录
+.trae/
+.mixin.out/
 
 # Forge 开发环境运行目录（含游戏资源与日志，体积很大）
 /forge/run/
@@ -24,7 +33,7 @@ hs_err_pid*
 /runs/
 
 # 构建/发布产物
-dist/*
+/dist/
 
 # 编辑器运行期配置（只忽略仓库根目录的同名目录，别误伤 com/viewmyui 包）
 editor-config.json
@@ -33,6 +42,9 @@ editor-config.json
 # 临时文件
 .screenshots/
 *.tmp
+*.bak
+*.orig
+*.rej
 
 # OS
 Thumbs.db

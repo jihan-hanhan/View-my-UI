@@ -1,24 +1,28 @@
 modLoader="javafml"
-loaderVersion="[47,)"
+loaderVersion="[4,)"
 license="MIT"
 
 [[mods]]
 modId="viewmyui"
-version="0.1.0"
+version="0.2.0"
 displayName="View My UI"
 authors="ViewMyUI"
 description='''Minecraft 模组 UI 补丁的离线预览与验证工具（开发版采集器）。'''
 
+# NeoForge 通过这里注册 Mixin 配置，dev 与正式环境一致，无需 jar manifest / 命令行参数
+[[mixins]]
+config="viewmyui.mixins.json"
+
 [[dependencies.viewmyui]]
-    modId="forge"
-    mandatory=true
-    versionRange="[47,)"
+    modId="neoforge"
+    type="required"
+    versionRange="[21.1.0,)"
     ordering="NONE"
     side="CLIENT"
 
 [[dependencies.viewmyui]]
     modId="minecraft"
-    mandatory=true
-    versionRange="[1.20.1,1.21)"
+    type="required"
+    versionRange="[1.21.1,1.21.2)"
     ordering="NONE"
     side="CLIENT"

@@ -1,6 +1,6 @@
 package com.viewmyui.forge;
 
-import net.minecraftforge.fml.common.Mod;
+import net.neoforged.fml.common.Mod;
 
 /**
  * 开发版采集器入口。刻意保持极薄——工具的主体（合成、编辑器）都在 {@code core} 与独立进程中，

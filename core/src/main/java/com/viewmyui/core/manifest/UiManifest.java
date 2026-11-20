@@ -16,11 +16,14 @@ public record UiManifest(
         screens = List.copyOf(screens);
     }
 
+    /**
+     * @param guiScale 1.21.1 起是 double（自动缩放可能是 2.5），1.20.1 的整数会被原样读入
+     */
     public record Meta(
             String minecraft,
             String loader,
             String modId,
-            int guiScale,
+            double guiScale,
             String capturedFrom) {
     }
 }

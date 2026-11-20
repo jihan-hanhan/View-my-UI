@@ -6,17 +6,23 @@
 > **当前定向（2026-11-14 定案）**：技术栈 **全 Java**；首个目标平台 **Minecraft 1.20.1 + Forge**；
 > 进程模型见 [2.3](#23-进程模型与文件访问已定案)。
 
+> **迁移分支（2026-11-20）**：`neoforge-1.21.1` —— 直接推进到 **Minecraft 1.21.1 + NeoForge 21.1.267**，
+> 构建插件换成 **NeoGradle 7.1.39**（Gradle 8.14.3 / JDK 21）。编辑器刻意保持在 Java 17 编译，
+> **同一份 editor 同时服务 1.20.1 与 1.21.1**，不随 Minecraft 版本分叉。详见 8.12。
+
 ---
 
-## 0. 当前进度总览（2026-11-14）
+## 0. 当前进度总览（2026-11-20）
 
 **一句话**：`采集 → manifest → 编辑器合成` 这条主链路已经端到端跑通（真实客户端 + 真实 HUD + TFC 砧界面验证过），
-编辑器打开后能自动带出游戏内实际使用的材质，不再需要手动导入资源包。
+编辑器打开后能自动带出游戏内实际使用的材质，不再需要手动导入资源包；
+**1.21.1 + NeoForge 分支已落地**（NeoGradle 7 + `blitSprite` 全量采集 + schema v2），编辑器与 1.20.1 共用。
 
 | 模块 | 状态 | 说明 |
 |---|---|---|
 | `core`（manifest 解析 / 资源包叠加 / 合成） | ✅ 可用 | 纯 Java，零 Minecraft 依赖 |
-| `forge-mod` 采集 | ✅ 可用 | Mixin 拦 `GuiGraphics.innerBlit`；帧边界 = `RenderTickEvent.START`；F9 落盘 |
+| `forge-mod` 采集（1.20.1） | ✅ 可用 | Mixin 拦 `GuiGraphics.innerBlit`；帧边界 = `RenderTickEvent.START`；F9 落盘 |
+| `forge-mod` 采集（1.21.1 NeoForge） | ✅ 可用 | 分支 `neoforge-1.21.1`：额外挂钩 `blitSprite` 六参与十参（九参委托）、`blit(..., TextureAtlasSprite)`；见 8.12 |
 | 游戏内热键 | ✅ 可用 | 监听 `InputEvent.Key`，GUI 打开时也能触发；键位跟随原版按键绑定 |
 | `editor`（JavaFX 独立进程） | ✅ 可用 | 画布 / 树状节点列表 / 源纹理 / 资源包优先级 / 导出 / 热重载 / 自由缩放 / 九宫格校验 |
 | F10 拉起编辑器 | ✅ 可用 | 用游戏自身 JVM 执行 `java -cp <editor>/lib/*`，输出写 `editor.log`；聊天栏提示避免连点 |
@@ -24,12 +30,13 @@
 | 原版 / 补丁包并排对比 | ✅ 可用 | 两套资源包各合成一张 → 左右并排 + 洋红差异高亮；CLI `--compare` |
 | 默认材质自动带出 | ✅ 可用 | F9 时把 manifest 引用到的纹理流式快照到 `viewmyui/default/assets/`，编辑器自动挂为最低优先级包 |
 | 工作区记忆 | ✅ 可用 | `editor-config.json` 记录当前包列表 + 最近 12 个历史工作区（下拉切换） |
-| 自由缩放 | ✅ 可用 | 0.25x–16x 滑条（Ctrl+滚轮 0.5 步进），不再局限 1/2/4 |
+| 自由缩放 | ✅ 可用 | 0.25x–16x 滑条（Ctrl+滚轮 0.5 步进，**以光标为锚点**，不再从左上角放大） |
 | 缩放采样切换 | ✅ 可用 | 「无」按 `guiScale` 物理分辨率合成（32×32→16 逻辑像素在 GUI 2x 下即 1:1，与游戏一致）；另有「最近邻」「双线性」两档逻辑像素对照 |
 | 九宫格校验 | ✅ 可用 | 对缩放节点画 3×3 分割线 + 拉伸区着色，源矩形越界标红；边框像素可调（默认 4） |
 | 切图参考图导出 | ✅ 可用 | 每张精灵图导出一张标注全部 `src` 矩形的 PNG；GUI 与 CLI `--references` |
 | 非 `GuiGraphics` 绘制（自己绑纹理 + `RenderSystem`） | ⬜ 未支持 | TFC 砧界面已确认走 `GuiGraphics`，可正常采集；该路径仅为其他模组兜底 |
-| `blitSprite` / `enableScissor` | ⬜ 未支持 | `blitSprite` 是 1.20.2+ 的东西；scissor 影响可见性 |
+| `blitSprite` / `enableScissor` | ✅ / ⬜ | 1.21.1 分支已完整采集 `blitSprite`（整图 + 局部 + nine_slice/tile 缩放语义）；`enableScissor` 仍影响可见性，未处理 |
+| 构建与分发 | ✅ 可用 | `./gradlew dist` 把模组 jar、独立编辑器 zip、解压目录统一收进 `dist/`；见 8.12 |
 
 **已完成（按时间顺序）**
 
@@ -44,11 +51,24 @@
 9. 默认材质快照 + 工作区记忆：打开编辑器零导入；历史包组合自动保留（8.9）。
 10. 精修：自由缩放、树状节点列表、九宫格校验、参考图导出、最近邻缩放采样、F10 聊天提示（8.10）。
 11. 编辑器内嵌进模组 jar：Gradle 自动打包 core + editor + 四平台 JavaFX，首次 F10 自解压启动（8.11）。
+12. **1.21.1 NeoForge 迁移**：NeoGradle 7.1.39 + Gradle 8.14.3 + JDK 21；`mods.toml` → `neoforge.mods.toml`，
+   Mixin 由 `[[mixins]] config=` 注册；运行时是 Mojmap，**无需 SRG 双名与 refmap**（8.12）。
+13. **manifest schema v2**：新增 `sprite` 节点与 `scaling`（`stretch` / `tile` / `nine_slice`），v1 清单仍可读；
+   `guiScale` 改为 `double`（1.21.1 的 `Window.getGuiScale()` 是 double）。
+14. **`blitSprite` 采集补全**：六参（整图）、十参（局部区域，九参委托给它）、
+   `blit(..., TextureAtlasSprite)`（背包空槽/状态效果等图集精灵）；按约定路径
+   `textures/gui/sprites/<path>.png` 解析纹理，缩放语义读同名 `.png.mcmeta`。
+15. **修复 sprite 全部丢失**：约定路径漏了 `.png`，`ResourceManager` 取不到资源 → 尺寸失败 → 整条节点被丢弃。
+   实机日志定位（`精灵图不在约定路径，跳过: .../sprites/widget/button`），修复后背包/进度条等控件恢复。
+16. **构建流程**：新增 `dist` 任务，统一产出 `viewmyui-neoforge-1.21.1-<ver>.jar`、独立编辑器 zip 与解压目录。
+17. **编辑器缩放**：Ctrl+滚轮改为以光标位置为锚点（缩放后回填滚动条），不再是左上角放大。
 
 **下一步（按优先级）**
 
 1. **资源包元信息**：读 `pack.mcmeta` 的 `pack_format` 并提示版本不匹配；支持一个包继承另一个包。
-2. **分发**：编辑器已随模组 jar 内嵌（8.11），无需再手工补全；jpackage 自带 runtime 降级为可选优化。
+2. **`enableScissor` 采集**：裁剪会影响可见性，1.21.1 容器界面里已开始出现。
+3. **`blitSprite` 其余变体**：带 `u1/v1` 的 9/10 参变体中的动画帧、以及直接绑定图集的非 `GuiGraphics` 路径（兜底）。
+4. **分发**：编辑器已随模组 jar 内嵌（8.11），`dist` 也已统一收口；jpackage 自带 runtime 降级为可选优化。
 
 统一收口点：以上 1 项应落在 `editor` + `core`，模组侧保持薄壳（第 2.3 节）。
 
@@ -669,3 +689,77 @@ JavaFX 17/21 在 Maven Central 上不发布 `linux-aarch64` 与 `win-aarch64`，
 **验证**：从 `editor-bundle/lib` 按运行时的同一套过滤规则拼 classpath（6 个 jar）启动
 `--export`，GUI 2x / 32×32→16 用例依旧逐像素 0 差异；最终 `reobfJar` 产物中
 `META-INF/viewmyui/editor/` 的 15 个 jar + `index.txt` + `version.txt` 完整保留。
+
+### 8.12 迁移 1.21.1 + NeoForge（2026-11-20，分支 `neoforge-1.21.1`）
+
+**工具链**：NeoGradle **7.1.39**（要求 Gradle ≥ 8.14）→ wrapper **8.14.3**（腾讯镜像）；
+JDK **21**；NeoForge **21.1.267**。注意 PATH 里的默认 java 可能是 25，跑 Gradle 必须显式设 `JAVA_HOME`。
+`maven.neoforged.net` 直连不通，构建需带代理参数（`-Dhttps.proxyHost=127.0.0.1 -Dhttps.proxyPort=7897`）。
+
+**模组侧变化**
+
+| 项 | 1.20.1 | 1.21.1 NeoForge |
+|---|---|---|
+| 元数据 | `mods.toml` | `neoforge.mods.toml`（`modLoader="javafml"`，依赖 `neoforge [21.1.0,)`） |
+| Mixin 注册 | jar manifest `MixinConfigs` | `[[mixins]] config="viewmyui.mixins.json"` |
+| 命名 | SRG 双名 + refmap | **Mojmap 运行时**，单一方法名，无 refmap |
+| 帧边界 | `RenderTickEvent.START` | `RenderFrameEvent.Pre`（`ClientTickEvent.Post` 处理按键延迟） |
+| 无关 | — | 1.21.1 无 `blitSprite` 以外的 tint 参数，着色来自全局 shader color，暂不采集 |
+
+**`GuiGraphics` 实测签名**（从 NeoForm 反编译产物核对，不是记忆）
+
+- `innerBlit(ResourceLocation, int x1, int x2, int y1, int y2, int z, float minU, float maxU, float minV, float maxV)`
+- `blitSprite(ResourceLocation, int x, int y, int z, int width, int height)`（整图；五参委托给它）
+- `blitSprite(ResourceLocation, int srcW, int srcH, int u, int v, int x, int y, int z, int width, int height)`
+  （局部；九参版本委托给它，z 固定 0。原版进度条/装饰件大量走这里）
+- `blit(int x, int y, int z, int w, int h, TextureAtlasSprite)`（背包空护甲槽、状态效果图标等）
+
+采集挂钩：`innerBlit` + 六参/十参 `blitSprite` + `blit(..., TextureAtlasSprite)`。
+`blitSprite` 内部会再走 `innerBlit`，用 `spriteDepth` 计数屏蔽，避免同一像素记两遍。
+
+**manifest schema v2**
+
+```jsonc
+{
+  "schemaVersion": 2,
+  "meta": { "minecraft": "1.21.1", "loader": "neoforge", "guiScale": 2 },
+  "screens": [{ "nodes": [
+    { "type": "blit",   "texture": "tfc:textures/gui/container/anvil.png", "src": [...], "dst": [...] },
+    { "type": "sprite", "sprite": "minecraft:widget/button",
+      "texture": "minecraft:textures/gui/sprites/widget/button.png",
+      "src": [0,0,200,20], "dst": [...],
+      "scaling": { "type": "nine_slice", "border": [4,4,4,4], "stretchInner": true } }
+  ]}]
+}
+```
+
+- `scaling` 由同名 `.png.mcmeta` 的 `gui.scaling` 规范化而来，三档：`stretch` / `tile` / `nine_slice`；
+  没有元数据时省略，读取端按 `stretch` 处理。
+- 局部绘制的 `src` 是精灵图像素坐标；对局部区域强制 `stretch`（原版此时忽略 tile/nine_slice）。
+- v1 清单（只有 `blit`）继续可读，`BlitNode` 的 10 参构造器保留兼容。
+
+**踩坑：约定路径漏了 `.png`**。初版把精灵纹理写成 `textures/gui/sprites/<path>`，
+`ResourceManager.getResource()` 需要带扩展名 → 取不到 → 读不到尺寸 → 节点被丢弃，
+表现为"物品栏/进度条等控件全部消失"，而编辑器侧 `PackResolver` 会自动补 `.png`，所以离线预览看不出问题。
+取证方式：打开实例 `logs/debug-*.log.gz`，能看到成片的
+`精灵图不在约定路径，跳过: minecraft:textures/gui/sprites/widget/button`。修复后统一带 `.png`。
+
+**同一份 editor 兼容两代**：`core` / `editor` 维持 Java 17 toolchain（class major 61），
+模组侧为 Java 21（major 65）；`editor` 只依赖 `core`，不 import 任何 Minecraft 类型，
+因此 1.20.1 与 1.21.1 共用同一个 `editor-0.2.0.jar`。`guiScale` 用 `double` 兼容 1.21.1 的取值。
+
+**构建与分发**：根目录 `./gradlew dist`（`Sync`）产出
+
+```
+dist/viewmyui-neoforge-1.21.1-<ver>.jar   模组（内嵌全平台编辑器）
+dist/viewmyui-editor-<ver>.zip            独立编辑器（含 bin 启动脚本）
+dist/viewmyui-editor/                     同一份编辑器的解压形态
+```
+
+`Sync` 会清掉旧版本残留；`installDist` 里 0 字节的 JavaFX 占位 jar 在打包时剔除。
+
+**编辑器缩放**：Ctrl+滚轮改为以光标为锚点——记录光标下的画布坐标，缩放重绘后
+在下一帧重新计算 `hvalue/vvalue`，把同一块内容挪回光标下。画布小于视口（无滚动条）时仍退化为左上角。
+
+**当前状态**：插件的编译、打包、`dist` 产出均通过；物品栏控件缺失问题已定位并修复，
+待用真实客户端重测 manifest 节点覆盖度。

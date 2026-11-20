@@ -1,6 +1,6 @@
 allprojects {
     group = 'com.viewmyui'
-    version = '0.1.0'
+    version = '0.2.0'
 }
 
 subprojects {
@@ -10,6 +10,62 @@ subprojects {
             name = 'TencentMirror'
             url = 'https://mirrors.cloud.tencent.com/nexus/repository/maven-public/'
         }
+        // NeoForge / NeoGradle 制品
+        maven {
+            name = 'NeoForged'
+            url = 'https://maven.neoforged.net/releases'
+        }
         mavenCentral()
+    }
+}
+
+/**
+ * 分发产物：{@code ./gradlew dist} 一条命令把可交付文件收进根目录 {@code dist/}。
+ *
+ * <ul>
+ *   <li>{@code viewmyui-neoforge-1.21.1-<version>.jar}：模组本体（编辑器已内嵌，丢进 mods/ 即可）。</li>
+ *   <li>{@code viewmyui-editor-<version>.zip}：独立编辑器，解压后双击 {@code bin/editor.bat}，
+ *       与模组内嵌的是同一份代码，不绑定 Minecraft 版本。</li>
+ *   <li>{@code viewmyui-editor/}：上面 zip 的解压形态，方便直接跑或做联调。</li>
+ * </ul>
+ *
+ * <p>用 {@link Sync} 而不是 {@link Copy}：旧版本的残留产物会被清掉，
+ * 避免从 {@code dist/} 里误拿上次构建的 jar。
+ */
+def editorModule = project(':editor')
+
+// installDist 会带上 0 字节的 javafx-*.jar 占位（无 classifier 的空 jar），对运行毫无用处
+def editorPlaceholder = { details ->
+    details.name.startsWith('javafx-') && details.name.endsWith('.jar') && details.file.length() < 1024
+}
+
+tasks.register('editorZip', Zip) {
+    group = 'distribution'
+    description = '打包独立编辑器（installDist 产物，含启动脚本）'
+    dependsOn editorModule.tasks.named('installDist')
+
+    // 外层套一层目录，解压后不会散落一地
+    from(editorModule.layout.buildDirectory.dir('install/editor')) {
+        into "viewmyui-editor-${project.version}"
+        exclude { details -> editorPlaceholder(details) }
+    }
+    archiveFileName = "viewmyui-editor-${project.version}.zip"
+    destinationDirectory = layout.buildDirectory.dir('dist-staging')
+}
+
+tasks.register('dist', Sync) {
+    group = 'distribution'
+    description = '收集模组 jar 与独立编辑器到 dist/'
+    dependsOn ':forge:jar', 'editorZip'
+
+    into layout.projectDirectory.dir('dist')
+
+    // 模组 jar：NeoGradle 已把 editorBundle 塞进 META-INF/viewmyui/editor/
+    from(project(':forge').tasks.named('jar'))
+    // 独立编辑器：zip 与解压目录各一份
+    from(editorZip)
+    from(editorModule.layout.buildDirectory.dir('install/editor')) {
+        into 'viewmyui-editor'
+        exclude { details -> editorPlaceholder(details) }
     }
 }
