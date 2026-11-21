@@ -8,14 +8,15 @@ import java.util.List;
  * @param width    界面逻辑宽（GUI scale 之前）
  * @param height   界面逻辑高
  * @param guiScale 采集时的 GUI 缩放倍率；游戏是在「逻辑像素 × guiScale」的物理分辨率上光栅化的，
- *                 所以 1 个逻辑像素对应 {@code guiScale × guiScale} 个真实像素。0 表示未知，按 1 处理。
+ *                 所以 1 个逻辑像素对应 {@code guiScale × guiScale} 个真实像素。
+ *                 1.20.1 是整数，1.21.1 起可能是 2.5 这类小数；0 表示未知，按 1 处理。
  */
 public record ScreenScene(
         String id,
         String title,
         int width,
         int height,
-        int guiScale,
+        double guiScale,
         List<BlitNode> nodes) {
 
     public ScreenScene {

@@ -1,0 +1,59 @@
+plugins {
+    id 'eclipse'
+    id 'idea'
+    // 1.21.1 起用 NeoGradle userdev（要求 Gradle 8.14+，见根目录 wrapper）
+    id 'net.neoforged.gradle.userdev' version '7.1.39'
+}
+
+// 1.21.1 模组沿用原来的版本号，与 1.20.1 的产物互不干扰
+version = '0.2.0'
+
+base {
+    archivesName = 'viewmyui-neoforge-1.21.1'
+}
+
+java {
+    // 1.21.1 的运行时是 Java 21
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+runs {
+    client {
+        workingDirectory = project.file('run')
+        // NeoForge 运行时即 Mojmap，无需再声明 mappings；
+        // Mixin 配置由 neoforge.mods.toml 的 [[mixins]] 注册，dev 与正式环境通用。
+        systemProperty 'neoforge.logging.markers', 'REGISTRIES'
+        systemProperty 'neoforge.logging.console.level', 'debug'
+        // 编辑器可执行文件路径（调试独立编辑器时用）
+        systemProperty 'viewmyui.editor', project.file('run/viewmyui/editor').absolutePath
+        // 仅在显式传 -PviewmyuiAutocapture=true 时开启自动采集
+        if (project.hasProperty('viewmyuiAutocapture')) {
+            systemProperty 'viewmyui.autocapture', 'true'
+        }
+        if (project.hasProperty('viewmyuiDebugMixin')) {
+            systemProperty 'mixin.debug.verbose', 'true'
+        }
+    }
+}
+
+dependencies {
+    implementation "net.neoforged:neoforge:21.1.267"
+    // 本阶段模组只负责采集与落盘，不引用 core；
+    // 等做 Overlay 叠加时再加 project(':core')，并处理 jar-in-jar。
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+}
+
+// 把编辑器（core + editor + 全平台 JavaFX）内嵌进模组 jar：
+// 运行时 EditorLauncher 首次 F10 解压到 <gameDir>/viewmyui/editor/<版本>/ 再拉起独立进程。
+// 用普通资源目录而不是 JarJar——JarJar 是给 FML 加载的库模组用的，启动外部 JVM 用不上。
+tasks.named('jar', Jar).configure {
+    dependsOn ':editor:editorBundle'
+    from(rootProject.file('editor/build/editor-bundle')) {
+        into 'META-INF/viewmyui/editor'
+    }
+}

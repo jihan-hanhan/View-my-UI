@@ -1,0 +1,49 @@
+name: Build 1.20.1
+
+# 不随 push 自动构建：只在手动触发或打 v* 标签时跑
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # 1.20.1 全链路只需要 17（core / editor / 模组 toolchain 均为 17）
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Make gradlew executable
+        run: chmod +x gradlew
+
+      - name: Build
+        run: ./gradlew :forge:build --no-daemon --stacktrace
+
+      - name: Upload mod jar
+        uses: actions/upload-artifact@v4
+        with:
+          name: viewmyui-forge
+          path: forge/build/libs/*.jar
+          if-no-files-found: error
+
+      # 独立编辑器与版本无关，放在 1.20.1 这个 workflow 里产出一份即可
+      - name: Upload standalone editor
+        uses: actions/upload-artifact@v4
+        with:
+          name: viewmyui-editor
+          path: editor/build/distributions/*.zip
+          if-no-files-found: error

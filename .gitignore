@@ -18,8 +18,9 @@ hs_err_pid*
 .project
 *.launch
 
-# Forge 开发环境运行目录（含游戏资源与日志，体积很大）
+# Forge / NeoForge 开发环境运行目录（含游戏资源与日志，体积很大）
 /forge/run/
+/1211/forge/run/
 /run/
 /runs/
 

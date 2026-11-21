@@ -1,33 +1,40 @@
 # View My UI
 
-Minecraft 1.20.1 Forge 的界面采集与离线预览工具：游戏里按 **F9** 把当前界面的所有
-`blit` 记录成 manifest，按 **F10** 用独立的 JavaFX 编辑器打开，直接看到「界面由哪些
-精灵图、哪些源矩形拼出来」。面向补丁 / 资源包作者改贴图。
+Minecraft 界面采集与离线预览工具：游戏里按 **F9** 把当前界面的所有 `blit` 记录成
+manifest，按 **F10** 用独立的 JavaFX 编辑器打开，直接看到「界面由哪些精灵图、哪些
+源矩形拼出来」。面向补丁 / 资源包作者改贴图。
+
+支持 **1.20.1 Forge** 与 **1.21.1 NeoForge**，两个版本共用同一份 `core` 与 `editor`。
 
 ## 组成
 
 | 模块 | 说明 |
 |---|---|
 | `core` | manifest 解析、资源包叠加、合成、差异比较（纯 Java，零 Minecraft 依赖） |
-| `forge` | Forge 薄壳：Mixin 采集、F9 落盘、F10 拉起编辑器；编辑器内嵌在它的 jar 里 |
 | `editor` | JavaFX 编辑器：画布、树状节点列表、资源包优先级、九宫格、导出、热重载 |
+| `forge` | 1.20.1 Forge 薄壳：Mixin 采集、F9 落盘、F10 拉起编辑器；编辑器内嵌在 jar 里 |
+| `1211/forge` | 1.21.1 NeoForge 薄壳，与 `forge` 行为一致，共用上面的 `core` / `editor` |
 | `dist` | 本地发布产物（构建生成，不入库） |
 
 ## 环境
 
-- JDK 17
-- 首次构建需要网络（Gradle 发行版、Forge、JavaFX 各平台 jar）
+- JDK 17（`core` / `editor` / 1.20.1 模组）与 JDK 21（1.21.1 模组）
+- Gradle 8.14.3（wrapper 已指定；NeoGradle 7 要求 8.14+，ForgeGradle 6 也兼容）
+- 首次构建需要网络（Gradle 发行版、Forge / NeoForge、JavaFX 各平台 jar）
 - 设计与进度记录见 `roadmap.md`
 
 ## 构建
 
 ```bash
-./gradlew build          # Windows: gradlew.bat build
+./gradlew build                  # 两个版本一起构建（Windows: gradlew.bat build）
+./gradlew :forge:build           # 只构建 1.20.1
+./gradlew :1211:forge:build      # 只构建 1.21.1
 ```
 
 产物：
 
-- `forge/build/libs/viewmyui-forge-1.20.1-0.1.0.jar` —— 模组 + 内嵌编辑器（约 29 MB）
+- `forge/build/libs/viewmyui-forge-1.20.1-0.1.0.jar` —— 1.20.1 模组 + 内嵌编辑器（约 29 MB）
+- `1211/forge/build/libs/viewmyui-neoforge-1.21.1-0.2.0.jar` —— 1.21.1 模组 + 内嵌编辑器
 - `editor/build/distributions/editor-0.1.0.zip` —— 独立编辑器（只含本平台 JavaFX）
 
 只重新整理内嵌资源：`./gradlew :editor:editorBundle`。
@@ -52,18 +59,19 @@ Minecraft 1.20.1 Forge 的界面采集与离线预览工具：游戏里按 **F9*
 ## 开发
 
 ```bash
-./gradlew :forge:runClient                               # 开发环境客户端
+./gradlew :forge:runClient                               # 1.20.1 开发环境客户端
+./gradlew :1211:forge:runClient                          # 1.21.1 开发环境客户端
 ./gradlew :forge:runClient -PviewmyuiAutocapture=true    # 进界面后自动采集
 ./gradlew :editor:run                                    # 直接运行编辑器
 ```
 
-开发环境默认从 `forge/run/viewmyui/editor` 找编辑器，发布版优先用 jar 内嵌的那份；
+开发环境默认从 `forge/run/viewmyui/editor`（1.21.1 为 `1211/forge/run/viewmyui/editor`）
+找编辑器，发布版优先用 jar 内嵌的那份；
 两种情况都可以用 `-Dviewmyui.editor=<路径>` 或环境变量 `VIEWMYUI_EDITOR` 覆盖。
 
 ## CI
 
-`.github/workflows/build.yml` **只在手动触发（Actions → Run workflow）或推送 `v*` 标签时构建**，
-不会在每次 push 时运行。构建完成后在 Actions 页面下载 `viewmyui-forge` / `viewmyui-editor`。
+两个独立 workflow：`.github/workflows/build-1201.yml` 与 `build-1211.yml`。
 
 ## 已知限制
 

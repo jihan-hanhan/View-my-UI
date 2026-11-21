@@ -1,4 +1,4 @@
-name: Build
+name: Build 1.21.1
 
 # 不随 push 自动构建：只在手动触发或打 v* 标签时跑
 on:
@@ -17,11 +17,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up JDK 17
+      # 模组需要 21；core / editor 的 toolchain 仍是 17，所以两个都装。
+      # 17 写在最后，让 JAVA_HOME 落在 17 上，ForgeGradle 6 的配置阶段也在 17 下执行。
+      - name: Set up JDK 21 & 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: |
+            21
+            17
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -30,18 +34,13 @@ jobs:
         run: chmod +x gradlew
 
       - name: Build
-        run: ./gradlew build --no-daemon --stacktrace
+        run: >-
+          ./gradlew :1211:forge:build --no-daemon --stacktrace
+          -Porg.gradle.java.installations.paths="$JAVA_HOME_17_X64,$JAVA_HOME_21_X64"
 
       - name: Upload mod jar
         uses: actions/upload-artifact@v4
         with:
-          name: viewmyui-forge
-          path: forge/build/libs/*.jar
-          if-no-files-found: error
-
-      - name: Upload standalone editor
-        uses: actions/upload-artifact@v4
-        with:
-          name: viewmyui-editor
-          path: editor/build/distributions/*.zip
+          name: viewmyui-neoforge
+          path: 1211/forge/build/libs/*.jar
           if-no-files-found: error

@@ -9,7 +9,9 @@ import com.viewmyui.core.render.Compositor;
 import javafx.application.Application;
 import javafx.application.Platform;
 import javafx.beans.property.ReadOnlyStringWrapper;
+import javafx.geometry.Bounds;
 import javafx.geometry.Insets;
+import javafx.geometry.Point2D;
 import javafx.geometry.Pos;
 import javafx.scene.Scene;
 import javafx.scene.canvas.Canvas;
@@ -251,6 +253,55 @@ public final class EditorApp extends Application {
         zoomLabel.setText(String.format("%.2fx", zoom));
     }
 
+    /**
+     * 以光标为锚点缩放。
+     *
+     * <p>直接改 {@code zoom} 再重绘时，{@link ScrollPane} 的 hvalue/vvalue 不变，
+     * 视觉上就是"以左上角为中心放大"。这里先记下光标下那块画布内容，
+     * 缩放后把滚动条挪回去，让同一块内容仍然停在光标下面。
+     */
+    private void zoomAt(double sceneX, double sceneY, double target) {
+        double clamped = Math.max(0.25, Math.min(16, target));
+        if (composite == null || scrollPane == null || Math.abs(clamped - zoom) < 1e-9) {
+            return;
+        }
+        double oldZoom = zoom;
+        Point2D cursor = scrollPane.sceneToLocal(sceneX, sceneY);
+        // 光标对应的画布坐标 = 当前滚动量 + 视口内偏移
+        double anchorX = scrollPane.getHvalue() * scrollableWidth() + cursor.getX();
+        double anchorY = scrollPane.getVvalue() * scrollableHeight() + cursor.getY();
+        double ratio = clamped / oldZoom;
+
+        setZoom(clamped);
+        redraw();
+
+        // 画布尺寸变了，要等 ScrollPane 重新算过内容边界，滚动值才有正确的取值范围
+        Platform.runLater(() -> {
+            if (scrollPane == null) {
+                return;
+            }
+            scrollPane.applyCss();
+            scrollPane.layout();
+            Point2D now = scrollPane.sceneToLocal(sceneX, sceneY);
+            double rangeX = scrollableWidth();
+            double rangeY = scrollableHeight();
+            double targetX = anchorX * ratio - now.getX();
+            double targetY = anchorY * ratio - now.getY();
+            scrollPane.setHvalue(rangeX > 0 ? Math.max(0, Math.min(1, targetX / rangeX)) : 0);
+            scrollPane.setVvalue(rangeY > 0 ? Math.max(0, Math.min(1, targetY / rangeY)) : 0);
+        });
+    }
+
+    private double scrollableWidth() {
+        Bounds viewport = scrollPane.getViewportBounds();
+        return Math.max(0, canvas.getWidth() - viewport.getWidth());
+    }
+
+    private double scrollableHeight() {
+        Bounds viewport = scrollPane.getViewportBounds();
+        return Math.max(0, canvas.getHeight() - viewport.getHeight());
+    }
+
     private SplitPane buildCenter() {
         scrollPane = new ScrollPane(new Pane(canvas));
         scrollPane.setPannable(true);
@@ -278,11 +329,10 @@ public final class EditorApp extends Application {
             updateSheet();
         });
         canvas.setOnScroll(e -> {
-            if (!e.isControlDown()) {
+            if (!e.isControlDown() || e.getDeltaY() == 0) {
                 return;
             }
-            setZoom(zoom + (e.getDeltaY() > 0 ? 0.5 : -0.5));
-            redraw();
+            zoomAt(e.getSceneX(), e.getSceneY(), zoom + (e.getDeltaY() > 0 ? 0.5 : -0.5));
             e.consume();
         });
 
@@ -598,14 +648,15 @@ public final class EditorApp extends Application {
         // 只要存在 源矩形 ≠ 目标矩形 的节点，三种方式就会画出不同的像素
         boolean scaled = false;
         for (BlitNode node : scene.nodes()) {
-            if (node.dstW() != node.srcW() || node.dstH() != node.srcH()) {
+            if (node.scaling().type() == com.viewmyui.core.manifest.GuiScaling.Type.NINE_SLICE
+                    || node.dstW() != node.srcW() || node.dstH() != node.srcH()) {
                 scaled = true;
                 break;
             }
         }
         scaleBox.setDisable(!scaled);
         scaleBox.setTooltip(new Tooltip(scaled
-                ? "「无」= 按 GUI " + Math.max(1, scene.guiScale())
+                ? "「无」= 按 GUI " + scaleText(Math.max(1, scene.guiScale()))
                 + "x 的物理分辨率合成（和游戏一致）；最近邻/双线性 = 按逻辑像素合成，用于对照"
                 : "当前场景没有缩放节点，三种方式结果一致"));
 
@@ -802,7 +853,9 @@ public final class EditorApp extends Application {
         g.setLineWidth(1);
 
         for (BlitNode node : scene.nodes()) {
-            if (node.dstW() == node.srcW() && node.dstH() == node.srcH()) {
+            boolean hasMetadata = node.scaling().type()
+                    == com.viewmyui.core.manifest.GuiScaling.Type.NINE_SLICE;
+            if (!hasMetadata && node.dstW() == node.srcW() && node.dstH() == node.srcH()) {
                 continue;
             }
             BufferedImage texture = texture(node.texture());
@@ -810,28 +863,42 @@ public final class EditorApp extends Application {
                 continue;
             }
 
-            // 把源图的边框像素映射到目标尺寸：九宫格里角块保持原像素，只有中心被拉伸
-            int bx = Math.max(1, Math.round(border * node.dstW() / (float) node.srcW()));
-            int by = Math.max(1, Math.round(border * node.dstH() / (float) node.srcH()));
             double unit = zoom * renderScale();
             double x = node.dstX() * unit;
             double y = node.dstY() * unit;
             double w = node.dstW() * unit;
             double h = node.dstH() * unit;
-            double bxz = bx * unit;
-            double byz = by * unit;
-            if (w <= 2 * bxz || h <= 2 * byz) {
+            double bxzL;
+            double bxzR;
+            double byzT;
+            double byzB;
+            if (hasMetadata) {
+                // 1.21.1 精灵图自带真实边框：角块保持源像素，目标里就是 border × 倍率
+                bxzL = node.scaling().left() * unit;
+                bxzR = node.scaling().right() * unit;
+                byzT = node.scaling().top() * unit;
+                byzB = node.scaling().bottom() * unit;
+            } else {
+                // 普通 blit 没有元数据，按「边框占源图的比例」估一个可视分割线
+                int bx = Math.max(1, Math.round(border * node.dstW() / (float) node.srcW()));
+                int by = Math.max(1, Math.round(border * node.dstH() / (float) node.srcH()));
+                bxzL = bx * unit;
+                bxzR = bxzL;
+                byzT = by * unit;
+                byzB = byzT;
+            }
+            if (w <= bxzL + bxzR || h <= byzT + byzB) {
                 continue;
             }
 
             g.setFill(Color.color(1.0, 0.55, 0.1, 0.10));
-            g.fillRect(x + bxz, y + byz, w - 2 * bxz, h - 2 * byz);
+            g.fillRect(x + bxzL, y + byzT, w - bxzL - bxzR, h - byzT - byzB);
 
             g.setStroke(Color.color(0.3, 0.8, 1.0, 0.85));
-            g.strokeLine(x + bxz + 0.5, y, x + bxz + 0.5, y + h);
-            g.strokeLine(x + w - bxz + 0.5, y, x + w - bxz + 0.5, y + h);
-            g.strokeLine(x, y + byz + 0.5, x + w, y + byz + 0.5);
-            g.strokeLine(x, y + h - byz + 0.5, x + w, y + h - byz + 0.5);
+            g.strokeLine(x + bxzL + 0.5, y, x + bxzL + 0.5, y + h);
+            g.strokeLine(x + w - bxzR + 0.5, y, x + w - bxzR + 0.5, y + h);
+            g.strokeLine(x, y + byzT + 0.5, x + w, y + byzT + 0.5);
+            g.strokeLine(x, y + h - byzB + 0.5, x + w, y + h - byzB + 0.5);
 
             if (node.srcX() < 0 || node.srcY() < 0
                     || node.srcX() + node.srcW() > texture.getWidth()
@@ -877,9 +944,9 @@ public final class EditorApp extends Application {
         if (scene == null) {
             return;
         }
-        String text = String.format("%d 个节点 · 缺失纹理 %d 个 · %d×%d（合成 %dx）· %.2fx",
+        String text = String.format("%d 个节点 · 缺失纹理 %d 个 · %d×%d（合成 %sx）· %.2fx",
                 scene.nodes().size(), missingCount, scene.width(), scene.height(),
-                renderScale(), zoom);
+                scaleText(renderScale()), zoom);
         status.setText(text);
         if (missingTextures.isEmpty()) {
             status.setTooltip(null);
@@ -1024,11 +1091,19 @@ public final class EditorApp extends Application {
      *
      * <p>「无」与游戏一致：1 个逻辑像素 = guiScale 个真实像素；另外两种按逻辑像素合成（倍率 1）。
      */
-    private int renderScale() {
+    private double renderScale() {
         if (scene == null) {
             return 1;
         }
+        // 1.21.1 的自动 GUI 缩放可能是 2.5，不能再用 int 截断
         return scaleMode() == Compositor.ScaleMode.NONE ? Math.max(1, scene.guiScale()) : 1;
+    }
+
+    /** 2 → "2"，2.5 → "2.5"，避免界面上出现 "2.0x" 这种噪音 */
+    private static String scaleText(double scale) {
+        String text = String.format(java.util.Locale.ROOT, "%.2f", scale);
+        text = text.replaceAll("0+$", "").replaceAll("\\.$", "");
+        return text.isEmpty() ? "1" : text;
     }
 
     private void refreshPacksLabel() {

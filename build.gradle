@@ -10,6 +10,11 @@ subprojects {
             name = 'TencentMirror'
             url = 'https://mirrors.cloud.tencent.com/nexus/repository/maven-public/'
         }
+        // NeoForge / NeoGradle 制品（1.21.1 模块）
+        maven {
+            name = 'NeoForged'
+            url = 'https://maven.neoforged.net/releases'
+        }
         mavenCentral()
     }
 }

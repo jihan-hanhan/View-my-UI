@@ -1,6 +1,7 @@
 package com.viewmyui.core.render;
 
 import com.viewmyui.core.manifest.BlitNode;
+import com.viewmyui.core.manifest.GuiScaling;
 import com.viewmyui.core.manifest.ScreenScene;
 import com.viewmyui.core.pack.PackResolver;
 
@@ -8,6 +9,7 @@ import javax.imageio.ImageIO;
 import java.awt.AlphaComposite;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
+import java.awt.Shape;
 import java.awt.geom.AffineTransform;
 import java.awt.image.AffineTransformOp;
 import java.awt.image.BufferedImage;
@@ -34,6 +36,11 @@ import java.util.Map;
  * <p>编辑器若只在逻辑尺寸上合成，就会真的把 32×32 压成 16×16、丢掉一半像素——怎么调采样方式都
  * 不可能和游戏一致。所以「无」档按 {@code guiScale} 放大画布，让缩放节点自己回到 1:1 或接近 1:1，
  * 剩下的非整数倍缩放再按 GL 的规则直接丢像素；另外两档故意保留逻辑尺寸，用来对照"被压缩后"的结果。
+ *
+ * <h2>1.21.1 精灵图</h2>
+ * {@code blitSprite} 采集下来的节点带 {@link GuiScaling}：stretch 直接缩放、tile 平铺、
+ * nine_slice 按边框把九个区域分别缩放。
+ * （1.21.1 的 {@code blitSprite} 不带颜色参数，着色来自全局 shader color，暂不采集。）
  */
 public final class Compositor {
 
@@ -68,10 +75,10 @@ public final class Compositor {
 
     public BufferedImage render(ScreenScene scene) throws IOException {
         // 「无」才回到游戏的物理分辨率；其余两种是"逻辑像素"对照视图，画布不放大
-        int scale = scaleMode == ScaleMode.NONE ? Math.max(1, scene.guiScale()) : 1;
+        double scale = scaleMode == ScaleMode.NONE ? Math.max(1, scene.guiScale()) : 1;
         BufferedImage canvas = new BufferedImage(
-                Math.max(1, scene.width() * scale),
-                Math.max(1, scene.height() * scale),
+                Math.max(1, (int) Math.ceil(scene.width() * scale)),
+                Math.max(1, (int) Math.ceil(scene.height() * scale)),
                 BufferedImage.TYPE_INT_ARGB);
 
         Graphics2D g = canvas.createGraphics();
@@ -94,12 +101,36 @@ public final class Compositor {
     }
 
     /**
-     * 单次 blit：裁出源矩形，再按目标尺寸缩放。
+     * 单次绘制：裁出源矩形，再按缩放语义落到目标矩形。
      *
      * <p>目标矩形先乘 {@code guiScale} 换到物理像素。放大后仍然 1:1 的节点直接整块贴上，
      * 不走任何缩放；其余按 {@link ScaleMode} 采样。
      */
-    private void draw(Graphics2D g, BufferedImage texture, BlitNode node, int scale) {
+    private void draw(Graphics2D g, BufferedImage texture, BlitNode node, double scale) {
+        BufferedImage source = crop(texture, node);
+        if (source == null) {
+            return;
+        }
+
+        int dstX = (int) Math.round(node.dstX() * scale);
+        int dstY = (int) Math.round(node.dstY() * scale);
+        int dstW = Math.max(1, (int) Math.round(node.dstW() * scale));
+        int dstH = Math.max(1, (int) Math.round(node.dstH() * scale));
+
+        switch (node.scaling().type()) {
+            case NINE_SLICE -> drawNineSlice(g, source, node.scaling(), dstX, dstY, dstW, dstH, scale);
+            case TILE -> tileRegion(g, source, 0, 0, source.getWidth(), source.getHeight(),
+                    dstX, dstY, dstW, dstH, scale);
+            default -> g.drawImage(scaled(source, dstW, dstH), dstX, dstY, null);
+        }
+    }
+
+    /**
+     * 按 manifest 里的 src 裁出源矩形，并夹到纹理真实尺寸内。
+     *
+     * @return {@code null} 表示裁剪结果为空
+     */
+    private static BufferedImage crop(BufferedImage texture, BlitNode node) {
         int textureWidth = texture.getWidth();
         int textureHeight = texture.getHeight();
 
@@ -107,25 +138,130 @@ public final class Compositor {
         int srcY = Math.max(0, node.srcY());
         int srcW = Math.min(node.srcW() - (srcX - node.srcX()), textureWidth - srcX);
         int srcH = Math.min(node.srcH() - (srcY - node.srcY()), textureHeight - srcY);
-        int dstW = node.dstW() * scale;
-        int dstH = node.dstH() * scale;
+        if (srcW <= 0 || srcH <= 0 || node.dstW() <= 0 || node.dstH() <= 0) {
+            return null;
+        }
+        return texture.getSubimage(srcX, srcY, srcW, srcH);
+    }
+
+    /**
+     * 九宫格：四个角不缩放，四边单轴拉伸，中心按 {@code stretchInner} 拉伸或平铺。
+     *
+     * <p>目标比边框总宽还窄时（例如 20 宽的按钮塞进 12 像素），按比例压缩边框，
+     * 不做"角块互相覆盖"的错误处理。
+     */
+    private void drawNineSlice(Graphics2D g, BufferedImage source, GuiScaling scaling,
+                               int dstX, int dstY, int dstW, int dstH, double scale) {
+        int sw = source.getWidth();
+        int sh = source.getHeight();
+        int l = clamp(scaling.left(), 0, sw);
+        int r = clamp(scaling.right(), 0, sw - l);
+        int t = clamp(scaling.top(), 0, sh);
+        int b = clamp(scaling.bottom(), 0, sh - t);
+        if (l == 0 && r == 0 && t == 0 && b == 0) {
+            g.drawImage(scaled(source, dstW, dstH), dstX, dstY, null);
+            return;
+        }
+
+        int left = borderSize(l, scale, dstW, true);
+        int right = borderSize(r, scale, dstW, false);
+        int top = borderSize(t, scale, dstH, true);
+        int bottom = borderSize(b, scale, dstH, false);
+
+        int sxMid = l;
+        int syMid = t;
+        int swMid = sw - l - r;
+        int shMid = sh - t - b;
+
+        int dxMid = dstX + left;
+        int dyMid = dstY + top;
+        int dwMid = Math.max(0, dstW - left - right);
+        int dhMid = Math.max(0, dstH - top - bottom);
+
+        // 四个角
+        drawRegion(g, source, 0, 0, l, t, dstX, dstY, left, top);
+        drawRegion(g, source, sw - r, 0, r, t, dstX + dstW - right, dstY, right, top);
+        drawRegion(g, source, 0, sh - b, l, b, dstX, dstY + dstH - bottom, left, bottom);
+        drawRegion(g, source, sw - r, sh - b, r, b,
+                dstX + dstW - right, dstY + dstH - bottom, right, bottom);
+
+        // 四条边（单轴拉伸）
+        drawRegion(g, source, sxMid, 0, swMid, t, dxMid, dstY, dwMid, top);
+        drawRegion(g, source, sxMid, sh - b, swMid, b, dxMid, dstY + dstH - bottom, dwMid, bottom);
+        drawRegion(g, source, 0, syMid, l, shMid, dstX, dyMid, left, dhMid);
+        drawRegion(g, source, sw - r, syMid, r, shMid, dstX + dstW - right, dyMid, right, dhMid);
+
+        // 中心
+        if (scaling.stretchInner()) {
+            drawRegion(g, source, sxMid, syMid, swMid, shMid, dxMid, dyMid, dwMid, dhMid);
+        } else {
+            tileRegion(g, source, sxMid, syMid, swMid, shMid, dxMid, dyMid, dwMid, dhMid, scale);
+        }
+    }
+
+    /**
+     * 边框在目标里的像素尺寸。总宽放不下时按比例压缩，保证 left + right 不超过目标宽。
+     *
+     * @param first 左侧/上侧为 {@code true}，右侧/下侧为 {@code false}（后者取剩余部分）
+     */
+    private int borderSize(int sourceBorder, double scale, int targetSize, boolean first) {
+        int scaled = (int) Math.round(sourceBorder * scale);
+        if (scaled <= 0) {
+            return 0;
+        }
+        if (scaled > targetSize) {
+            return first ? targetSize : 0;
+        }
+        return scaled;
+    }
+
+    private void drawRegion(Graphics2D g, BufferedImage source,
+                            int srcX, int srcY, int srcW, int srcH,
+                            int dstX, int dstY, int dstW, int dstH) {
         if (srcW <= 0 || srcH <= 0 || dstW <= 0 || dstH <= 0) {
             return;
         }
+        BufferedImage part = source.getSubimage(srcX, srcY, srcW, srcH);
+        g.drawImage(scaled(part, dstW, dstH), dstX, dstY, null);
+    }
 
-        int dstX = node.dstX() * scale;
-        int dstY = node.dstY() * scale;
-        BufferedImage source = texture.getSubimage(srcX, srcY, srcW, srcH);
-        if (srcW == dstW && srcH == dstH) {
-            g.drawImage(source, dstX, dstY, null);
+    /**
+     * 把一块源区域按原尺寸平铺到目标矩形里，超出部分裁剪。
+     */
+    private void tileRegion(Graphics2D g, BufferedImage source,
+                            int srcX, int srcY, int srcW, int srcH,
+                            int dstX, int dstY, int dstW, int dstH, double scale) {
+        if (srcW <= 0 || srcH <= 0 || dstW <= 0 || dstH <= 0) {
             return;
         }
+        int tileW = Math.max(1, (int) Math.round(srcW * scale));
+        int tileH = Math.max(1, (int) Math.round(srcH * scale));
+        BufferedImage tile = scaled(source.getSubimage(srcX, srcY, srcW, srcH), tileW, tileH);
 
-        BufferedImage scaled = scaleMode == ScaleMode.SMOOTH
+        Shape clip = g.getClip();
+        g.clipRect(dstX, dstY, dstW, dstH);
+        try {
+            for (int y = 0; y < dstH; y += tileH) {
+                for (int x = 0; x < dstW; x += tileW) {
+                    g.drawImage(tile, dstX + x, dstY + y, null);
+                }
+            }
+        } finally {
+            g.setClip(clip);
+        }
+    }
+
+    private static int clamp(int value, int min, int max) {
+        return Math.max(min, Math.min(max, value));
+    }
+
+    private BufferedImage scaled(BufferedImage source, int dstW, int dstH) {
+        if (dstW == source.getWidth() && dstH == source.getHeight()) {
+            return source;
+        }
+        return scaleMode == ScaleMode.SMOOTH
                 ? smooth(source, dstW, dstH)
-                // 「无」也不代表魔法：物理上仍非 1:1 的节点，游戏怎么丢像素就怎么丢
                 : nearest(source, dstW, dstH);
-        g.drawImage(scaled, dstX, dstY, null);
     }
 
     /**

@@ -5,6 +5,11 @@ pluginManagement {
             name = 'MinecraftForge'
             url = 'https://maven.minecraftforge.net/'
         }
+        // NeoGradle 7 插件仓库（1.21.1 模块用）
+        maven {
+            name = 'NeoForged'
+            url = 'https://maven.neoforged.net/releases'
+        }
         // 国内可用镜像，优先于官方源，避免 Plugin Portal 访问不畅
         maven {
             name = 'TencentMirror'
@@ -17,6 +22,12 @@ pluginManagement {
 
 rootProject.name = 'viewmyui'
 
+// 共享：core（纯 Java）+ editor（JavaFX），两个 MC 版本共用同一份
 include 'core'
-include 'forge'
 include 'editor'
+
+// 1.20.1 Forge
+include 'forge'
+
+// 1.21.1 NeoForge（源码在 1211/forge，与 core/editor 共用根构建）
+include '1211:forge'
